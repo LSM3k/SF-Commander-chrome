@@ -28,6 +28,18 @@
         </select>
       </section>
 
+      <section>
+        <h2>Language Toggle</h2>
+        <p class="desc">
+          Debug language used by the @lang palette command. The palette toggles
+          User.LanguageLocaleKey between this and your working language.
+        </p>
+
+        <label for="debugLanguage">Debug language</label>
+        <select id="debugLanguage"><option value="">Loading…</option></select>
+        <p id="debugLanguageWarning" class="warn" style="display:none"></p>
+      </section>
+
       <div class="actions">
         <button id="save" class="primary">Save</button>
         <button id="test" class="secondary">Test connection</button>

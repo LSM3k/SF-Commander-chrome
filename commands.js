@@ -98,8 +98,17 @@ var FLOW_DEBUG_ACTION = {
   action: 'flow-debug',
 };
 
+var LANGUAGE_TOGGLE_ACTION = {
+  label: 'Toggle debug language',
+  sublabel: 'Switch User.LanguageLocaleKey',
+  url: '#',
+  icon: ICON_MAP.user,
+  type: 'action',
+  action: 'language-toggle',
+};
+
 function getRootResults() {
-  var actions = [SOQL_ACTION];
+  var actions = [SOQL_ACTION, LANGUAGE_TOGGLE_ACTION];
   if (typeof isFlowBuilderPage === 'function' && isFlowBuilderPage()) {
     actions.unshift(FLOW_DEBUG_ACTION);
   }
@@ -113,6 +122,7 @@ var SHORTCUT_ACTIONS = [
   { label: 'Browse custom metadata types', sublabel: '@cmd',    keyword: 'cmd',        icon: ICON_MAP.object },
   { label: 'SOQL Generator',               sublabel: '@soql',   keyword: 'soql',       icon: ICON_MAP.code },
   { label: 'Debug this flow',              sublabel: '@debug',  keyword: 'flow-debug', icon: ICON_MAP.flow },
+  { label: 'Toggle debug language',        sublabel: '@lang',   keyword: 'lang',       icon: ICON_MAP.user },
 ];
 
 function getShortcutResults() {
@@ -207,6 +217,34 @@ function resolveCmdtScoped(filter, cmdt) {
   };
 }
 
+// Language picker: filter across active User.LanguageLocaleKey values.
+// Languages are passed in (fetched async by content.js); resolver stays sync.
+function resolveLanguagePicker(filter, languages) {
+  var all = languages || [];
+  var filtered = filter
+    ? fuzzyFilter(filter, all, function (l) { return l.label + ' ' + l.value; })
+    : all;
+  var count = filtered.length;
+  return {
+    mode: 'language-picker',
+    results: filtered.slice(0, 30).map(function (l) {
+      return {
+        label: l.label,
+        sublabel: l.value,
+        url: '#',
+        icon: ICON_MAP.user,
+        type: 'language',
+        language: l,
+      };
+    }),
+    hint: all.length === 0
+      ? 'Loading active languages…'
+      : filter
+        ? (count === 0 ? 'No languages match' : count + ' matching language' + (count === 1 ? '' : 's'))
+        : all.length + ' active language' + (all.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
 // Object picker mode: filter across all objects only
 function resolveObjectPicker(filter) {
   const allObjects = getAllObjects();
@@ -294,6 +332,15 @@ function resolveInput(rawInput) {
       mode: 'soql-hint',
       results: [SOQL_ACTION],
       hint: 'Press Enter to open the SOQL generator',
+    };
+  }
+
+  // "@lang" / "@language" — hint to press Enter to toggle
+  if (lc === 'lang' || lc === 'language') {
+    return {
+      mode: 'language-hint',
+      results: [LANGUAGE_TOGGLE_ACTION],
+      hint: 'Press Enter to toggle language',
     };
   }
 

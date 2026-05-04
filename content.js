@@ -9,7 +9,7 @@
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'language-picker'
   var scopedObject = null;
   var scopedCmdt = null;
   var objectPickerFilter = '';
@@ -17,6 +17,8 @@
   var cmdtPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
+  var languageToggleInFlight = false;
+  var _languagePickerCache = null;
 
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
@@ -79,6 +81,8 @@
         renderResults(resolveCmdtPicker(val));
       } else if (searchMode === 'cmd-scoped') {
         renderResults(resolveCmdtScoped(val, scopedCmdt));
+      } else if (searchMode === 'language-picker') {
+        renderResults(resolveLanguagePicker(val, _languagePickerCache || []));
       } else if (searchMode === 'soql') {
         // No live filtering; only react to Enter
       } else {
@@ -119,6 +123,10 @@
         enterCmdPickerMode('');
         return;
       }
+      if (keyword === 'lang' || keyword === 'language') {
+        runLanguageToggle();
+        return;
+      }
     }
     if (searchMode === 'soql') {
       runSoqlGeneration();
@@ -145,6 +153,7 @@
       case 'cmd-picker':
       case 'soql':
       case 'flow-debug':
+      case 'language-picker':
         goToRoot();
         return;
       default:
@@ -480,6 +489,63 @@
     }
   }
 
+  async function runLanguageToggle() {
+    if (languageToggleInFlight) return;
+    languageToggleInFlight = true;
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = 'Switching language…';
+    try {
+      await performLanguageToggle();
+      hidePalette();
+      window.location.reload();
+    } catch (err) {
+      languageToggleInFlight = false;
+      if (err && err.message === 'NO_DEBUG_LANGUAGE') {
+        enterLanguagePicker();
+        return;
+      }
+      if (hintEl) hintEl.textContent = 'Failed: ' + err.message;
+      console.warn('sfnav: language toggle failed —', err);
+    }
+  }
+
+  async function enterLanguagePicker() {
+    searchMode = 'language-picker';
+    _languagePickerCache = null;
+    var input = document.getElementById('sfnav-input');
+    input.value = '';
+    input.placeholder = 'Pick debug language…';
+    renderResults(resolveLanguagePicker('', []));
+    input.focus();
+    try {
+      var languages = await fetchActiveLanguages();
+      if (searchMode !== 'language-picker') return;
+      _languagePickerCache = languages;
+      renderResults(resolveLanguagePicker(input.value, _languagePickerCache));
+    } catch (err) {
+      if (searchMode !== 'language-picker') return;
+      var hintEl = document.getElementById('sfnav-hint');
+      if (hintEl) hintEl.textContent = 'Failed to load languages: ' + err.message;
+      console.warn('sfnav: fetchActiveLanguages failed —', err);
+    }
+  }
+
+  async function commitLanguagePickerSelection(language) {
+    if (languageToggleInFlight) return;
+    languageToggleInFlight = true;
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = 'Saving and switching…';
+    try {
+      await setDebugLanguageAndToggle(language.value);
+      hidePalette();
+      window.location.reload();
+    } catch (err) {
+      languageToggleInFlight = false;
+      if (hintEl) hintEl.textContent = 'Failed: ' + err.message;
+      console.warn('sfnav: language commit failed —', err);
+    }
+  }
+
   function renderFlowDebugResult(result) {
     var outputEl = document.getElementById('sfnav-flowdebug-output');
     var summarySec = outputEl.querySelector('.sfnav-flowdebug-summary');
@@ -634,6 +700,9 @@
         '<span class="sfnav-bc-seg sfnav-bc-current">' + esc(resolution.cmdt.label) + '</span>' +
         ' <span class="sfnav-bc-arrow">›</span>';
       breadcrumbEl.style.display = 'flex';
+    } else if (resolution.mode === 'language-picker') {
+      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@lang</span> <span class="sfnav-bc-arrow">›</span>';
+      breadcrumbEl.style.display = 'flex';
     } else {
       breadcrumbEl.textContent = '';
       breadcrumbEl.style.display = 'none';
@@ -688,6 +757,16 @@
       return;
     }
 
+    if (result && result.type === 'action' && result.action === 'language-toggle') {
+      runLanguageToggle();
+      return;
+    }
+
+    if (result && result.type === 'language') {
+      commitLanguagePickerSelection(result.language);
+      return;
+    }
+
     if (result && result.type === 'object') {
       enterObjectScopedMode(result.object);
       return;
@@ -719,6 +798,7 @@
       case 'cmd':        enterCmdPickerMode(''); return;
       case 'soql':       enterSoqlMode(); return;
       case 'flow-debug': enterFlowDebugMode(); return;
+      case 'lang':       runLanguageToggle(); return;
     }
   }
 
@@ -795,6 +875,22 @@
       e.preventDefault();
       e.stopPropagation();
       togglePalette();
+    }
+  });
+
+  // Options page asks any open SF tab for the active language list and the
+  // current user's language (it can't call sfRestPreamble itself — runs at
+  // chrome-extension://).
+  chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
+    if (msg && msg.type === 'language.activeLanguages') {
+      Promise.all([fetchActiveLanguages(), fetchCurrentUserLanguage()])
+        .then(function (results) {
+          sendResponse({ ok: true, languages: results[0], currentLanguage: results[1].languageLocaleKey });
+        })
+        .catch(function (err) {
+          sendResponse({ ok: false, error: err.message });
+        });
+      return true; // async sendResponse
     }
   });
 

@@ -127,3 +127,13 @@ button.secondary:hover {
   color: #0070d2;
   font-weight: 600;
 }
+
+.warn {
+  font-size: 12px;
+  color: #8c5500;
+  background: #fff7e0;
+  border: 1px solid #f7d27c;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 10px 0 0;
+}
